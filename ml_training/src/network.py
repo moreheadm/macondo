@@ -6,7 +6,7 @@ class ClippedReLU(nn.Module):
         return torch.clamp(x, min=0, max=1)
 
 class NNUE(nn.Module):
-    def __init__(self, input_dim=6939, hidden_dim=256, activation=ClippedReLU()):
+    def __init__(self, input_dim=6131, hidden_dim=256, activation=ClippedReLU()):
         super(NNUE, self).__init__()
         self.fc1 = nn.Linear(input_dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)

@@ -12,6 +12,8 @@ from dqn_trainer import *
 from network import *
 from replay_buffer import *
 
+DEVICE = 'cuda'
+
 ENGLISH_LETTER_DIST = {
     '?': 2,
     'E': 12,
@@ -218,10 +220,10 @@ class AutoplayConverter:
         return torch.cat(actions).coalesce()
 
 class QTrainer:
-    def __init__(self, checkpoint_file=None, capacity=None):
+    def __init__(self, checkpoint_file=None, buffer_filename=None, capacity=None):
         if checkpoint_file:
             if os.path.exists(checkpoint_file):
-                self.load_state(checkpoint_file, capacity)
+                self.load_state(checkpoint_file, buffer_filename, capacity)
             else:
                 print(f'Input file {checkpoint_file} does not exist', file=sys.stderr)
                 exit(1)
@@ -231,37 +233,59 @@ class QTrainer:
 
             self.policy_net = NNUE()
             self.replay_buffer = ReplayBuffer(capacity)
-            self.optimizer = optim.Adam(self.policy_net.parameters())
+            self.optimizer = optim.Adam(self.policy_net.parameters(), lr=1e-5, weight_decay=1e-5)
+        self.trainer = None
 
     def initialize(self):
         self.policy_net.initialize_parameters()
         
-    def load_state(self, filename, capacity=None):
+    def load_state(self, filename,  buffer_filename, capacity=None):
         checkpoint = torch.load(filename)
 
-        if capacity is None:
-            capacity = len(checkpoint['replay_buffer'])
-        self.replay_buffer = ReplayBuffer(capacity)
-        self.replay_buffer.buffer = checkpoint['replay_buffer']
+        if buffer_filename is not None:
+            replay_buffer_checkpoint = torch.load(buffer_filename)
 
-        self.policy_net = NNUE()
+            if capacity is None:
+                capacity = len(replay_buffer_checkpoint['replay_buffer'])
+            self.replay_buffer = ReplayBuffer(capacity)
+            self.replay_buffer.buffer = replay_buffer_checkpoint['replay_buffer']
+
+        self.policy_net = NNUE().to(DEVICE)
         self.policy_net.load_state_dict(checkpoint['policy_state_dict'])
 
         self.optimizer = optim.Adam(self.policy_net.parameters())
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
-    def save_state(self, filename):
-        torch.save({
-            #'policy_state_dict': self.policy_net.state_dict(),
-            'replay_buffer': self.replay_buffer.buffer,
-            #'optimizer_state_dict': self.optimizer.state_dict(),
-        }, filename)
+    def save_state(self, filename, buffer_filename):
+        saved_object = {
+            'policy_state_dict': self.policy_net.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+        }
+        if self.trainer is not None: saved_object['training_stats'] = self.trainer.training_stats
+        torch.save(saved_object, filename)
+
+        if buffer_filename is not None:
+            torch.save({
+                'replay_buffer': self.replay_buffer.buffer,
+            }, buffer_filename)
+
+    def add_data_to_replay_buffer(self, capacity):
+        # Add your logic here for adding new data to the replay buffer
+        pass
+
+    def convert_autoplay_file(self, autoplay_filename):
+        converter = AutoplayConverter(autoplay_filename)
+        converter.convert()
+        print(f'Converted {len(converter.get_experiences())} experiences')
+        for experience in converter.get_experiences():
+            self.replay_buffer.push(experience)
+            print('Size: ', experience.get_size())
 
     def train(self, steps):
-        target_net = NNUE()
+        target_net = NNUE().to(DEVICE)
         target_net.load_state_dict(self.policy_net.state_dict())
-        trainer = DQNTrainer(self.policy_net, target_net, self.replay_buffer, self.optimizer)
-        trainer.train(steps)
+        self.trainer = DQNTrainer(self.policy_net, target_net, self.replay_buffer, self.optimizer)
+        self.trainer.train(steps)
 
     def add_data_to_replay_buffer(self, capacity):
         # Add your logic here for adding new data to the replay buffer
@@ -286,7 +310,7 @@ def main():
     parser.add_argument('-c', '--capacity', type=int, help='Replay buffer capacity')
     args = parser.parse_args()
 
-    qt = QTrainer(args.input_filename, args.capacity)
+    qt = QTrainer(args.input_filename, args.buffer_filename, args.capacity)
 
     if args.mode == 'initialize':
         qt.initialize()
@@ -297,7 +321,7 @@ def main():
     elif args.mode == 'train':
         qt.train(args.steps)
 
-    qt.save_state(args.output_filename)
+    qt.save_state(args.output_filename, None if args.mode != convert else args.buffer_filename)
 
 
 if __name__ == '__main__':
