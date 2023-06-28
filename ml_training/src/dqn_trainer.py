@@ -9,7 +9,7 @@ from network import *
 DEVICE = 'cuda'
 
 class DQNTrainer:
-    def __init__(self, policy_net, target_net, replay_buffer, optimizer, batch_size=1024, target_update=10):
+    def __init__(self, policy_net, target_net, replay_buffer, optimizer, scheduler, batch_size=1024, target_update=32):
         self.policy_net = policy_net
 
         self.target_net = target_net
@@ -17,6 +17,7 @@ class DQNTrainer:
 
         self.replay_buffer = replay_buffer
         self.optimizer = optimizer
+        self.scheduler = scheduler
         self.batch_size = batch_size
         self.target_update = target_update
         self.loss_fn = nn.MSELoss()
@@ -36,7 +37,7 @@ class DQNTrainer:
         state_action_values = self.policy_net(afterstate_batch)
 
         with torch.no_grad():
-            next_state_accum_batch = self.target_net.first_layer(next_state_batch)
+            next_state_accum_batch = self.target_net.first_layer(next_state_batch, without_bias=True)
             next_state_values = []
             for i, exp in enumerate(experiences):
                 if exp.done == 0.0:
@@ -44,8 +45,14 @@ class DQNTrainer:
                     next_actions_values = self.target_net.first_layer(exp.next_actions.to(DEVICE))
                     out = self.target_net(next_actions_values + accum, skip_input=True)
                     next_state_values.append(out.max())
+
                 else:
                     next_state_values.append(0.0)
+
+            #if len(experiences[0].next_actions) > 0:
+            #    self.target_net.test_nnue(next_state_batch[0].to_dense().unsqueeze(0),
+            #                experiences[0].next_actions[0].to_dense().unsqueeze(0).to(DEVICE))
+
             next_state_values = torch.tensor(next_state_values).to(DEVICE)
 
             expected_state_action_values = \
@@ -67,4 +74,8 @@ class DQNTrainer:
             self.train_step(pbar)
             if step % self.target_update == 0:
                 self.target_net.load_state_dict(self.policy_net.state_dict())
+
+            self.scheduler.step()
+        print('Average loss:', sum([st['loss'] for st in self.training_stats]) / len(self.training_stats))
+
 

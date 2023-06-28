@@ -223,7 +223,7 @@ class QTrainer:
     def __init__(self, checkpoint_file=None, buffer_filename=None, capacity=None):
         if checkpoint_file:
             if os.path.exists(checkpoint_file):
-                self.load_state(checkpoint_file, buffer_filename, capacity)
+                self.load_state(checkpoint_file)
             else:
                 print(f'Input file {checkpoint_file} does not exist', file=sys.stderr)
                 exit(1)
@@ -231,24 +231,35 @@ class QTrainer:
             if capacity is None:
                 capacity = 10000
 
-            self.policy_net = NNUE()
+            self.policy_net = NNUE().to(DEVICE)
+            self.optimizer = optim.Adam(self.policy_net.parameters(), lr=1e-2, weight_decay=1e-5)
+            self.scheduler = optim.lr_scheduler.ConstantLR(self.optimizer, factor=0.5**(1./64), total_iters=128*20)
+
+        if buffer_filename:
+            if os.path.exists(buffer_filename):
+                self.load_replay_buffer(buffer_filename, capacity)
+            else:
+                print(f'Input file {checkpoint_file} does not exist', file=sys.stderr)
+                exit(1)
+        else:
             self.replay_buffer = ReplayBuffer(capacity)
-            self.optimizer = optim.Adam(self.policy_net.parameters(), lr=1e-5, weight_decay=1e-5)
+
         self.trainer = None
 
     def initialize(self):
         self.policy_net.initialize_parameters()
-        
-    def load_state(self, filename,  buffer_filename, capacity=None):
-        checkpoint = torch.load(filename)
 
-        if buffer_filename is not None:
-            replay_buffer_checkpoint = torch.load(buffer_filename)
+    def load_replay_buffer(self, filename, capacity=None):
+        if filename is not None:
+            replay_buffer_checkpoint = torch.load(filename)
 
             if capacity is None:
                 capacity = len(replay_buffer_checkpoint['replay_buffer'])
             self.replay_buffer = ReplayBuffer(capacity)
             self.replay_buffer.buffer = replay_buffer_checkpoint['replay_buffer']
+        
+    def load_state(self, filename):
+        checkpoint = torch.load(filename)
 
         self.policy_net = NNUE().to(DEVICE)
         self.policy_net.load_state_dict(checkpoint['policy_state_dict'])
@@ -256,10 +267,14 @@ class QTrainer:
         self.optimizer = optim.Adam(self.policy_net.parameters())
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
+        self.scheduler = optim.lr_scheduler.ConstantLR(self.optimizer, factor=0.5**(1./128.), total_iters=128*20.)
+        self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+
     def save_state(self, filename, buffer_filename):
         saved_object = {
             'policy_state_dict': self.policy_net.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
+            'scheduler_state_dict': self.scheduler.state_dict()
         }
         if self.trainer is not None: saved_object['training_stats'] = self.trainer.training_stats
         torch.save(saved_object, filename)
@@ -284,7 +299,8 @@ class QTrainer:
     def train(self, steps):
         target_net = NNUE().to(DEVICE)
         target_net.load_state_dict(self.policy_net.state_dict())
-        self.trainer = DQNTrainer(self.policy_net, target_net, self.replay_buffer, self.optimizer)
+        print('Learning rate:', self.scheduler.get_last_lr())
+        self.trainer = DQNTrainer(self.policy_net, target_net, self.replay_buffer, self.optimizer, self.scheduler)
         self.trainer.train(steps)
 
     def add_data_to_replay_buffer(self, capacity):
@@ -321,7 +337,7 @@ def main():
     elif args.mode == 'train':
         qt.train(args.steps)
 
-    qt.save_state(args.output_filename, None if args.mode != convert else args.buffer_filename)
+    qt.save_state(args.output_filename, None if args.mode != 'convert' else args.buffer_filename)
 
 
 if __name__ == '__main__':
