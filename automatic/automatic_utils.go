@@ -224,7 +224,7 @@ func StartCompVCompStaticGames(ctx context.Context, cfg *config.Config,
 	})
 
 	g.Go(func() error {
-		logfile.WriteString("playerID,gameID,turn,rack,play,score,totalscore,tilesplayed,leave,equity,tilesremaining,oppscore\n")
+		logfile.WriteString("playerID,gameID,turn,rack,play,score,totalscore,tilesplayed,leave,equity,tilesremaining,oppscore,moves\n")
 		for msg := range logChan {
 			logfile.WriteString(msg)
 		}

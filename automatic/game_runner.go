@@ -6,6 +6,8 @@ package automatic
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/domino14/word-golib/kwg"
@@ -18,6 +20,8 @@ import (
 	"github.com/domino14/macondo/config"
 	"github.com/domino14/macondo/gaddag"
 	"github.com/domino14/macondo/game"
+	"github.com/domino14/macondo/movegen"
+
 	pb "github.com/domino14/macondo/gen/api/proto/macondo"
 	"github.com/domino14/macondo/move"
 )
@@ -38,6 +42,7 @@ type GameRunner struct {
 	gamechan           chan string
 	aiplayers          [2]aiturnplayer.AITurnPlayer
 	order              [2]int
+	gen                movegen.MoveGenerator
 }
 
 // NewGameRunner just instantiates and initializes a game runner.
@@ -112,6 +117,9 @@ func (r *GameRunner) Init(players []AutomaticRunnerPlayer) error {
 		r.aiplayers[idx] = btp
 	}
 	r.order = [2]int{0, 1}
+
+	r.gen = movegen.NewGordonGenerator(gd, r.game.Board(), r.game.Bag().LetterDistribution())
+	r.gen.SetGenPass(true)
 	return nil
 }
 
@@ -165,6 +173,15 @@ func (r *GameRunner) genBestMoveForBot(playerIdx int) *move.Move {
 
 // PlayBestTurn generates the best move for the player and plays it on the board.
 func (r *GameRunner) PlayBestTurn(playerIdx int, addToHistory bool) error {
+	r.gen.(*movegen.GordonGenerator).SetGame(r.game)
+	r.gen.GenAll(r.game.RackFor(playerIdx), true)
+	plays := r.gen.(*movegen.GordonGenerator).Plays()
+	var descriptions []string
+	for _, move := range plays {
+		descriptions = append(descriptions, move.ShortDescription()+" "+strconv.Itoa(move.Score()))
+	}
+	movesString := strings.Join(descriptions, ";")
+
 	bestPlay := r.genBestMoveForBot(playerIdx)
 	// save rackLetters for logging.
 	rackLetters := r.game.RackLettersFor(playerIdx)
@@ -174,8 +191,9 @@ func (r *GameRunner) PlayBestTurn(playerIdx int, addToHistory bool) error {
 	if err != nil {
 		return err
 	}
+
 	if r.logchan != nil {
-		r.logchan <- fmt.Sprintf("%v,%v,%v,%v,%v,%v,%v,%v,%v,%.3f,%v,%v\n",
+		r.logchan <- fmt.Sprintf("%v,%v,%v,%v,%v,%v,%v,%v,%v,%.3f,%v,%v,%v\n",
 			nickOnTurn,
 			r.game.Uid(),
 			r.game.Turn(),
@@ -187,7 +205,8 @@ func (r *GameRunner) PlayBestTurn(playerIdx int, addToHistory bool) error {
 			bestPlay.Leave().UserVisible(r.alphabet),
 			bestPlay.Equity(),
 			tilesRemaining,
-			r.game.PointsFor((playerIdx+1)%2))
+			r.game.PointsFor((playerIdx+1)%2),
+			movesString)
 	}
 	return nil
 }
