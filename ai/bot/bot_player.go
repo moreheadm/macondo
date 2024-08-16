@@ -71,6 +71,13 @@ func addBotFields(p *turnplayer.BaseTurnPlayer, conf *BotConfig, botType pb.BotR
 
 	if botType == pb.BotRequest_NO_LEAVE_BOT {
 		calculators = []equity.EquityCalculator{equity.NewNoLeaveCalculator()}
+	} else if botType == pb.BotRequest_HASTY_NNUE_BOT {
+		c1, err := equity.NewExhaustiveLeaveCalculator(
+			p.LexiconName(), &conf.Config, conf.LeavesFile)
+		if err != nil {
+			return nil, err
+		}
+		calculators = []equity.EquityCalculator{c1}
 	} else {
 		c1, err := equity.NewExhaustiveLeaveCalculator(
 			p.LexiconName(), &conf.Config, conf.LeavesFile)

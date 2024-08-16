@@ -150,6 +150,7 @@ message BotRequest {
     SIMMING_INFER_BOT = 13;
     // harder bots here? inference? ml, etc.
 
+	HASTY_NNUE_BOT = 14;
     // This should have probably been number 0.
     UNKNOWN = 100;
   }
